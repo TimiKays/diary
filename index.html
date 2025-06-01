@@ -56,16 +56,32 @@
             <textarea id="log-content" placeholder="内容"></textarea>
             <input type="file" id="log-image" accept="image/*" />
             <div id="image-preview" style="margin-bottom:12px;"></div>
-            <button id="save-log-btn">保存</button>
-            <button id="cancel-edit-btn">取消</button>
+            <div class="edit-btn-group">
+                <button id="save-log-btn">保存</button>
+                <button id="cancel-edit-btn">取消</button>
+                <!-- 删除按钮由JS动态插入 -->
+            </div>
         </div>
-        <div id="log-view-section" style="display:none;">
+        <div id="log-view-section" style="display:none; position:relative;">
+            <!-- 返回按钮，局左对齐，显示“返回”，调整宽度 -->
+            <button id="back-list-btn" class="back-btn" title="返回" style="position:absolute;left:16px;top:16px;display:flex;align-items:center;gap:4px;border:none;background:none;cursor:pointer;color:#6366f1;font-size:1rem;padding:4px 8px;">
+                <svg width="18" height="18" viewBox="0 0 22 22" fill="none">
+                    <path d="M14 18L8 11L14 4" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                返回
+            </button>
             <h2 id="view-title"></h2>
             <div id="view-date"></div>
-            <img id="view-image" style="max-width:100%;margin-bottom:12px;display:none;" />
+            <img id="view-image" style="max-width:100%;margin-bottom:12px;display:none;cursor:zoom-in;" />
             <div id="view-content"></div>
-            <button id="edit-log-btn">编辑</button>
-            <button id="back-list-btn">返回列表</button>
+            <div class="view-btn-group" style="display:flex;gap:14px;justify-content:center;margin-top:10px;">
+                <button id="edit-log-btn">编辑</button>
+                <!-- 删除按钮由JS动态插入 -->
+            </div>
+        </div>
+        <!-- 大图预览弹窗 -->
+        <div id="img-modal" style="display:none;position:fixed;z-index:9999;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
+            <img id="img-modal-img" style="max-width:96vw;max-height:90vh;border-radius:10px;box-shadow:0 4px 32px #000a;" />
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-min.js"></script>
@@ -78,4 +94,4 @@
     </script>
     <script src="main.js"></script>
 </body>
-</html> 
+</html>

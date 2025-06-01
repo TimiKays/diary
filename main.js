@@ -7,8 +7,7 @@ const LC_CLASS = 'PersonalLog';
 // 登录相关
 async function login(username, password) {
     try {
-        const user = await AV.User.logIn(username, password);
-        return user;
+        return await AV.User.logIn(username, password);
     } catch (e) {
         throw e;
     }
@@ -16,7 +15,9 @@ async function login(username, password) {
 function logout() {
     AV.User.logOut();
     showLoginSection();
-    // 清空输入框和错误提示
+    clearLoginForm();
+}
+function clearLoginForm() {
     document.getElementById('login-username').value = '';
     document.getElementById('login-password').value = '';
     document.getElementById('login-error').innerText = '';
@@ -24,39 +25,45 @@ function logout() {
 
 // 页面切换
 function showLoginSection() {
-    document.getElementById('login-section').style.display = '';
-    document.getElementById('app').style.display = 'none';
-    document.getElementById('user-bar').style.display = 'none';
+    setDisplay('login-section', true);
+    setDisplay('app', false);
+    setDisplay('user-bar', false);
 }
 function showAppSection() {
-    document.getElementById('login-section').style.display = 'none';
-    document.getElementById('app').style.display = '';
-    // 显示用户名
+    setDisplay('login-section', false);
+    setDisplay('app', true);
     const user = AV.User.current();
     if (user) {
         document.getElementById('current-username').innerText = user.getUsername();
-        document.getElementById('user-bar').style.display = '';
+        setDisplay('user-bar', true);
     }
 }
+function setDisplay(id, show) {
+    document.getElementById(id).style.display = show ? '' : 'none';
+}
 
-// 绑定登录按钮
-document.getElementById('login-btn').onclick = async function() {
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value;
-    const errorDiv = document.getElementById('login-error');
-    errorDiv.innerText = '';
-    if (!username || !password) {
-        errorDiv.innerText = '请输入用户名和密码';
-        return;
-    }
-    try {
-        await login(username, password);
-        showAppSection();
-        renderLogList();
-    } catch (e) {
-        errorDiv.innerText = '登录失败：' + (e.message || '请检查用户名和密码');
-    }
-};
+// 登录按钮事件
+const loginBtn = document.getElementById('login-btn');
+if (loginBtn) {
+    loginBtn.onclick = async function() {
+        const username = document.getElementById('login-username').value.trim();
+        const password = document.getElementById('login-password').value;
+        const errorDiv = document.getElementById('login-error');
+        errorDiv.innerText = '';
+        if (!username || !password) {
+            errorDiv.innerText = '请输入用户名和密码';
+            return;
+        }
+        try {
+            await login(username, password);
+            showAppSection();
+            renderLogList();
+        } catch (e) {
+            errorDiv.innerText = '登录失败：' + (e.message || '请检查用户名和密码');
+        }
+    };
+}
+document.getElementById('logout-btn').onclick = logout;
 
 // 初始化页面显示
 function checkLogin() {
@@ -95,12 +102,13 @@ async function fetchLogsFromCloud() {
 async function saveLogToCloud(log) {
     const user = getCurrentUser();
     if (!user) return;
-    let obj;
-    if (log.id) {
-        obj = AV.Object.createWithoutData(LC_CLASS, log.id);
-    } else {
-        obj = new AV.Object(LC_CLASS);
-    }
+    let obj = log.id ? AV.Object.createWithoutData(LC_CLASS, log.id) : new AV.Object(LC_CLASS);
+    // 增加 ACL 权限控制：仅允许当前用户访问（可按需扩展）
+    const acl = new AV.ACL();
+    acl.setReadAccess(user, true);
+    acl.setWriteAccess(user, true);
+    acl.setPublicReadAccess(false);
+    obj.setACL(acl);
     obj.set('user', user);
     obj.set('title', log.title);
     obj.set('content', log.content);
@@ -113,14 +121,13 @@ async function saveLogToCloud(log) {
 
 // 覆盖本地的getLogs/saveLogs，优先云端
 async function getLogs() {
-    let logs = [];
     try {
-        logs = await fetchLogsFromCloud();
-        saveLogs(logs); // 同步到本地缓存
-    } catch (e) {
-        logs = JSON.parse(localStorage.getItem(logListKey) || '[]');
+        const logs = await fetchLogsFromCloud();
+        saveLogs(logs);
+        return logs;
+    } catch {
+        return JSON.parse(localStorage.getItem(logListKey) || '[]');
     }
-    return logs;
 }
 function saveLogs(logs) {
     localStorage.setItem(logListKey, JSON.stringify(logs));
@@ -130,27 +137,45 @@ async function renderLogList() {
     const logs = await getLogs();
     const list = document.getElementById('log-list');
     list.innerHTML = '';
-    if (logs.length === 0) {
+    if (!logs.length) {
         list.innerHTML = '<li style="text-align:center;color:#aaa;">暂无日志</li>';
         return;
     }
     logs.forEach(log => {
         const li = document.createElement('li');
-        let imgHtml = log.image ? `<img class='log-thumb' src='${log.image}' alt='缩略图' />` : '';
-        let metaHtml = `<div class='log-meta'>${log.date ? `<span class='log-date'>${log.date}</span>` : ''}<span class='log-time'>${log.updated || log.created}</span></div>`;
-        let titleHtml = `<div class='log-title'>${log.title}</div>`;
-        let contentPreview = log.content ? `<div class='log-content-preview'>${log.content.replace(/\n/g, ' ').slice(0, 60)}${log.content.length > 60 ? '...' : ''}</div>` : '';
-        li.innerHTML = `${imgHtml}${metaHtml}${titleHtml}${contentPreview}`;
-        li.onclick = () => showLogView(log.id);
+        let imgHtml = '';
+        if (log.image) {
+            imgHtml = `<img class='log-thumb' src='${log.image}' alt='缩略图' />`;
+        }
+        li.innerHTML = `
+            ${imgHtml}
+            <div class='log-meta'>${log.date ? `<span class='log-date'>${log.date}</span>` : ''}<span class='log-time'>${log.updated || log.created}</span></div>
+            <div class='log-title'>${log.title}</div>
+            ${log.content ? `<div class='log-content-preview'>${log.content.replace(/\n/g, ' ').slice(0, 60)}${log.content.length > 60 ? '...' : ''}</div>` : ''}
+        `;
+        // 判断图片为竖图时加tall-item类
+        if (log.image) {
+            const img = new window.Image();
+            img.src = log.image;
+            img.onload = function() {
+                if (img.naturalHeight > img.naturalWidth) {
+                    li.classList.add('tall-item');
+                }
+            };
+        }
+        li.addEventListener('click', function(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+            showLogView(log.id);
+        });
         list.appendChild(li);
     });
 }
 
 function showSection(section) {
-    document.getElementById('log-list-section').style.display = section === 'list' ? '' : 'none';
-    document.getElementById('log-edit-section').style.display = section === 'edit' ? '' : 'none';
-    document.getElementById('log-view-section').style.display = section === 'view' ? '' : 'none';
-    let delBtn = document.getElementById('delete-log-btn');
+    setDisplay('log-list-section', section === 'list');
+    setDisplay('log-edit-section', section === 'edit');
+    setDisplay('log-view-section', section === 'view');
+    const delBtn = document.getElementById('delete-log-btn');
     if (delBtn) delBtn.style.display = section === 'view' ? '' : 'none';
 }
 
@@ -169,16 +194,43 @@ function showLogEdit(log) {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
-            reader.onload = function(evt) {
+            reader.onload = evt => {
                 currentImageBase64 = evt.target.result;
                 renderImagePreview(currentImageBase64);
             };
             reader.readAsDataURL(file);
         }
     };
-    document.getElementById('save-log-btn').onclick = function() {
-        saveLog(log ? log.id : null);
-    };
+    document.getElementById('save-log-btn').onclick = () => saveLog(log ? log.id : null);
+    // 动态添加删除按钮并放入edit-btn-group中
+    let delBtn = document.getElementById('edit-delete-btn');
+    const btnGroup = document.querySelector('#log-edit-section .edit-btn-group');
+    if (!delBtn) {
+        delBtn = document.createElement('button');
+        delBtn.id = 'edit-delete-btn';
+        delBtn.className = 'delete-btn';
+        delBtn.innerText = '删除日志';
+        delBtn.onclick = async function() {
+            if (log && log.id && confirm('确定要删除这条日志吗？')) {
+                await deleteLogFromCloud(log.id);
+                showSection('list');
+                renderLogList();
+            }
+        };
+        btnGroup.appendChild(delBtn);
+    } else {
+        delBtn.style.display = log ? '' : 'none';
+        delBtn.onclick = async function() {
+            if (log && log.id && confirm('确定要删除这条日志吗？')) {
+                await deleteLogFromCloud(log.id);
+                showSection('list');
+                renderLogList();
+            }
+        };
+    }
+    if (!log) {
+        if (delBtn) delBtn.style.display = 'none';
+    }
 }
 
 function renderImagePreview(img) {
@@ -208,19 +260,14 @@ async function showLogView(id) {
         showSection('list');
         renderLogList();
     };
-    // 动态添加删除按钮
+    // 动态添加删除按钮到view-btn-group
     let delBtn = document.getElementById('delete-log-btn');
+    const btnGroup = document.querySelector('#log-view-section .view-btn-group');
     if (!delBtn) {
         delBtn = document.createElement('button');
         delBtn.id = 'delete-log-btn';
+        delBtn.className = 'delete-btn';
         delBtn.innerText = '删除日志';
-        delBtn.style.background = '#e53e3e';
-        delBtn.style.color = '#fff';
-        delBtn.style.marginLeft = '12px';
-        delBtn.style.border = 'none';
-        delBtn.style.borderRadius = '4px';
-        delBtn.style.padding = '6px 16px';
-        delBtn.style.cursor = 'pointer';
         delBtn.onclick = async function() {
             if (confirm('确定要删除这条日志吗？')) {
                 await deleteLogFromCloud(log.id);
@@ -228,7 +275,7 @@ async function showLogView(id) {
                 renderLogList();
             }
         };
-        document.getElementById('log-view-section').appendChild(delBtn);
+        btnGroup.appendChild(delBtn);
     } else {
         delBtn.onclick = async function() {
             if (confirm('确定要删除这条日志吗？')) {
@@ -238,6 +285,10 @@ async function showLogView(id) {
             }
         };
         delBtn.style.display = '';
+        // 确保按钮在view-btn-group内
+        if (delBtn.parentNode !== btnGroup) {
+            btnGroup.appendChild(delBtn);
+        }
     }
 }
 
@@ -290,12 +341,29 @@ document.getElementById('cancel-edit-btn').onclick = function() {
 // 删除日志（云端）
 async function deleteLogFromCloud(id) {
     if (!id) return;
-    const obj = AV.Object.createWithoutData(LC_CLASS, id);
-    await obj.destroy();
+    await AV.Object.createWithoutData(LC_CLASS, id).destroy();
+}
+
+// 大图预览功能
+function setupImageModal() {
+    const viewImg = document.getElementById('view-image');
+    const modal = document.getElementById('img-modal');
+    const modalImg = document.getElementById('img-modal-img');
+    if (viewImg && modal && modalImg) {
+        viewImg.onclick = function() {
+            if (viewImg.src && viewImg.style.display !== 'none') {
+                modalImg.src = viewImg.src;
+                modal.style.display = 'flex';
+            }
+        };
+        modal.onclick = function() {
+            modal.style.display = 'none';
+            modalImg.src = '';
+        };
+    }
 }
 
 // 初始化
 checkLogin();
 showSection('list');
-
-document.getElementById('logout-btn').onclick = logout; 
+setupImageModal();
