@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人日志</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="user-bar" style="display:none;position:fixed;top:16px;right:16px;z-index:999;font-size:15px;">
+        <span id="current-username" style="margin-right:12px;color:#409eff;"></span>
+        <button id="logout-btn" style="background:#f56c6c;color:#fff;border:none;border-radius:4px;padding:6px 16px;cursor:pointer;">退出登录</button>
+    </div>
+    <div id="login-section" style="max-width:400px;margin:60px auto;display:none;">
+        <div style="text-align:center;margin-bottom:24px;">
+            <div style="font-size:2.6rem;color:#6366f1;margin-bottom:8px;">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="24" cy="24" r="12" fill="#fff"/>
+                  <circle cx="24" cy="24" r="7" fill="#6366f1"/>
+                  <g stroke="#6366f1" stroke-width="2">
+                    <line x1="24" y1="4" x2="24" y2="12"/>
+                    <line x1="24" y1="36" x2="24" y2="44"/>
+                    <line x1="4" y1="24" x2="12" y2="24"/>
+                    <line x1="36" y1="24" x2="44" y2="24"/>
+                    <line x1="10.93" y1="10.93" x2="16.97" y2="16.97"/>
+                    <line x1="31.03" y1="31.03" x2="37.07" y2="37.07"/>
+                    <line x1="10.93" y1="37.07" x2="16.97" y2="31.03"/>
+                    <line x1="31.03" y1="16.97" x2="37.07" y2="10.93"/>
+                  </g>
+                </svg>
+            </div>
+            <div style="font-size:1.5rem;color:#6366f1;font-weight:700;letter-spacing:2px;">LOGO</div>
+        </div>
+        <h2 style="text-align:center;">用户登录</h2>
+        <div class="login-input-wrap">
+            <span class="login-input-icon">&#128100;</span>
+            <input type="text" id="login-username" placeholder="请输入手机号/微信号" />
+        </div>
+        <div class="login-input-wrap">
+            <span class="login-input-icon">&#128274;</span>
+            <input type="password" id="login-password" placeholder="请输入密码" />
+        </div>
+        <button id="login-btn">立即登录</button>
+        <div id="login-error"></div>
+    </div>
+    <div id="app">
+        <h1>个人日志</h1>
+        <div id="log-list-section">
+            <button id="add-log-btn">新增日志</button>
+            <ul id="log-list"></ul>
+        </div>
+        <div id="log-edit-section" style="display:none;">
+            <h2 id="edit-title">新增日志</h2>
+            <input type="date" id="log-date" />
+            <input type="text" id="log-title" placeholder="标题" />
+            <textarea id="log-content" placeholder="内容"></textarea>
+            <input type="file" id="log-image" accept="image/*" />
+            <div id="image-preview" style="margin-bottom:12px;"></div>
+            <button id="save-log-btn">保存</button>
+            <button id="cancel-edit-btn">取消</button>
+        </div>
+        <div id="log-view-section" style="display:none;">
+            <h2 id="view-title"></h2>
+            <div id="view-date"></div>
+            <img id="view-image" style="max-width:100%;margin-bottom:12px;display:none;" />
+            <div id="view-content"></div>
+            <button id="edit-log-btn">编辑</button>
+            <button id="back-list-btn">返回列表</button>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-min.js"></script>
+    <script>
+        AV.init({
+            appId: 'lZJwwBAcKTxgTtRSBUjC0I8C-gzGzoHsz',
+            appKey: 'd2gls3yXZuB2OdSPQCshNSeK',
+            serverURL: 'https://lzjwwbac.lc-cn-n1-shared.com'
+        });
+    </script>
+    <script src="main.js"></script>
+</body>
+</html> 
