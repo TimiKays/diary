@@ -54,7 +54,7 @@
             <input type="date" id="log-date" />
             <input type="text" id="log-title" placeholder="标题" />
             <textarea id="log-content" placeholder="内容"></textarea>
-            <input type="file" id="log-image" accept="image/*" />
+            <input type="file" id="log-image" accept="image/*" multiple />
             <div id="image-preview" style="margin-bottom:12px;"></div>
             <div class="edit-btn-group">
                 <button id="save-log-btn">保存</button>
@@ -72,6 +72,7 @@
             </button>
             <h2 id="view-title"></h2>
             <div id="view-date"></div>
+            <div id="view-image-container"></div>
             <img id="view-image" style="max-width:100%;margin-bottom:12px;display:none;cursor:zoom-in;" />
             <div id="view-content"></div>
             <div class="view-btn-group" style="display:flex;gap:14px;justify-content:center;margin-top:10px;">

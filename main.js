@@ -89,21 +89,30 @@ async function fetchLogsFromCloud() {
     query.equalTo('user', user);
     query.descending('createdAt');
     const results = await query.find();
-    return results.map(obj => ({
-        id: obj.id,
-        title: obj.get('title'),
-        content: obj.get('content'),
-        date: obj.get('date'),
-        image: obj.get('image'),
-        created: obj.get('created'),
-        updated: obj.get('updated')
-    }));
+    return results.map(obj => {
+        let img = obj.get('image');
+        // 尝试将 image 字段解析成数组，如果失败则使用原始值
+        try {
+            img = JSON.parse(img);
+        } catch (e) {
+            // img 保持原值
+        }
+        return {
+            id: obj.id,
+            title: obj.get('title'),
+            content: obj.get('content'),
+            date: obj.get('date'),
+            image: img,
+            created: obj.get('created'),
+            updated: obj.get('updated')
+        };
+    });
 }
+
 async function saveLogToCloud(log) {
     const user = getCurrentUser();
     if (!user) return;
     let obj = log.id ? AV.Object.createWithoutData(LC_CLASS, log.id) : new AV.Object(LC_CLASS);
-    // 增加 ACL 权限控制：仅允许当前用户访问（可按需扩展）
     const acl = new AV.ACL();
     acl.setReadAccess(user, true);
     acl.setWriteAccess(user, true);
@@ -113,26 +122,65 @@ async function saveLogToCloud(log) {
     obj.set('title', log.title);
     obj.set('content', log.content);
     obj.set('date', log.date);
-    obj.set('image', log.image);
+    // 确保 image 是有效的 JSON 字符串
+    obj.set('image', JSON.stringify(log.image || []));
     obj.set('created', log.created);
     obj.set('updated', log.updated);
-    await obj.save();
+    const savedObj = await obj.save();
+    // 返回保存后的对象id
+    return savedObj.id;
 }
 
-// 覆盖本地的getLogs/saveLogs，优先云端
+// 覆盖本地的 getLogs/saveLogs，优化存储逻辑
 async function getLogs() {
     try {
         const logs = await fetchLogsFromCloud();
-        saveLogs(logs);
+        saveLogs(logs.map(log => ({
+            id: log.id,
+            title: log.title,
+            content: log.content,
+            date: log.date,
+            created: log.created,
+            updated: log.updated,
+            imageCount: Array.isArray(log.image) ? log.image.length : 0 // 仅存储图片数量
+        })));
         return logs;
     } catch {
         return JSON.parse(localStorage.getItem(logListKey) || '[]');
     }
 }
+
 function saveLogs(logs) {
-    localStorage.setItem(logListKey, JSON.stringify(logs));
+    try {
+        localStorage.setItem(logListKey, JSON.stringify(logs));
+    } catch (error) {
+        console.error('保存日志到 localStorage 失败:', error);
+        alert('本地存储空间不足，无法保存日志列表。请尝试以下操作：\n1. 清理浏览器缓存。\n2. 删除部分日志以释放空间。');
+    }
 }
 
+// 修改图片预览函数，支持移除图片
+function renderImagePreview(imgArray) {
+    const preview = document.getElementById('image-preview');
+    if (imgArray && imgArray.length) {
+        preview.innerHTML = imgArray.map((img, index) => `
+            <div style="position: relative; display: inline-block; margin-right: 8px;">
+                <img style="max-width: 120px; max-height: 120px; border-radius: 4px; border: 1px solid #eee;" src="${img}" alt="预览" />
+                <button style="position: absolute; top: -8px; right: -8px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer;" onclick="removeImage(${index})">×</button>
+            </div>
+        `).join('');
+    } else {
+        preview.innerHTML = '';
+    }
+}
+
+// 添加移除图片的函数
+function removeImage(index) {
+    currentImagesBase64.splice(index, 1);
+    renderImagePreview(currentImagesBase64);
+}
+
+// 修改 renderLogList，确保正确加载图片
 async function renderLogList() {
     const logs = await getLogs();
     const list = document.getElementById('log-list');
@@ -144,25 +192,15 @@ async function renderLogList() {
     logs.forEach(log => {
         const li = document.createElement('li');
         let imgHtml = '';
-        if (log.image) {
-            imgHtml = `<img class='log-thumb' src='${log.image}' alt='缩略图' />`;
+        if (log.image && Array.isArray(log.image) && log.image.length > 0) {
+            imgHtml = `<img class='log-thumb' src='${log.image[0]}' alt='缩略图' />`;
         }
         li.innerHTML = `
             ${imgHtml}
-            <div class='log-meta'>${log.date ? `<span class='log-date'>${log.date}</span>` : ''}<span class='log-time'>${log.updated || log.created}</span></div>
             <div class='log-title'>${log.title}</div>
             ${log.content ? `<div class='log-content-preview'>${log.content.replace(/\n/g, ' ').slice(0, 60)}${log.content.length > 60 ? '...' : ''}</div>` : ''}
+            <div class='log-meta'>${log.date ? `<span class='log-date'>${log.date}</span>` : ''}<span class='log-time'>${log.updated || log.created}</span></div>
         `;
-        // 判断图片为竖图时加tall-item类
-        if (log.image) {
-            const img = new window.Image();
-            img.src = log.image;
-            img.onload = function() {
-                if (img.naturalHeight > img.naturalWidth) {
-                    li.classList.add('tall-item');
-                }
-            };
-        }
         li.addEventListener('click', function(e) {
             if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
             showLogView(log.id);
@@ -179,29 +217,216 @@ function showSection(section) {
     if (delBtn) delBtn.style.display = section === 'view' ? '' : 'none';
 }
 
-let currentImageBase64 = '';
+// 将单张图片变量改为数组，支持多图上传
+let currentImagesBase64 = [];
 
+// 工具函数：图片压缩
+async function compressImage(base64String, maxWidth = 1200, quality = 0.8) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            
+            if (width > maxWidth) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.src = base64String;
+    });
+}
+
+// 工具函数：防抖
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
+// 显示加载状态
+function showLoading(show, message = '保存中...') {
+    let loading = document.getElementById('loading-overlay');
+    if (!loading) {
+        loading = document.createElement('div');
+        loading.id = 'loading-overlay';
+        loading.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        `;
+        const content = document.createElement('div');
+        content.style.cssText = `
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        `;
+        loading.appendChild(content);
+        document.body.appendChild(loading);
+    }
+    const content = loading.querySelector('div');
+    content.innerHTML = `
+        <div class="loading-spinner"></div>
+        <div style="margin-top: 10px;">${message}</div>
+    `;
+    loading.style.display = show ? 'flex' : 'none';
+}
+
+// 修改图片上传处理，支持追加模式
+document.getElementById('log-image').onchange = async function(e) {
+    const files = e.target.files;
+    if (files.length > 9 - currentImagesBase64.length) {
+        alert('每条日志最多上传 9 张图片');
+        return;
+    }
+    if (files.length) {
+        showLoading(true, '处理图片中...');
+        try {
+            const promises = Array.from(files).map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = async (evt) => {
+                        // 压缩图片
+                        const compressed = await compressImage(evt.target.result);
+                        resolve(compressed);
+                    };
+                    reader.readAsDataURL(file);
+                });
+            });
+            
+            const results = await Promise.all(promises);
+            currentImagesBase64 = currentImagesBase64.concat(results); // 追加模式
+            renderImagePreview(currentImagesBase64);
+        } catch (error) {
+            console.error('图片处理失败:', error);
+            alert('图片处理失败，请重试');
+        } finally {
+            showLoading(false);
+        }
+    }
+};
+
+// 删除日志（云端）
+async function deleteLogFromCloud(id) {
+    if (!id) return;
+    await AV.Object.createWithoutData(LC_CLASS, id).destroy();
+}
+
+// 优化保存逻辑，添加重试机制
+async function saveLogWithRetry(log, maxRetries = 3) {
+    let retries = 0;
+    while (retries < maxRetries) {
+        try {
+            return await saveLogToCloud(log);
+        } catch (error) {
+            retries++;
+            if (retries === maxRetries) {
+                throw error;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+        }
+    }
+}
+
+// 修改保存日志函数
+async function saveLog(id) {
+    try {
+        showLoading(true, '保存中...');
+        const title = document.getElementById('log-title').value.trim();
+        const content = document.getElementById('log-content').value.trim();
+        const date = document.getElementById('log-date').value;
+        const images = currentImagesBase64;
+
+        if (!title || !content) {
+            alert('标题和内容不能为空！');
+            return;
+        }
+
+        let log = {
+            id: id || '',
+            title,
+            content,
+            date,
+            image: images,
+            updated: new Date().toLocaleString()
+        };
+
+        if (!id) {
+            log.created = log.updated;
+            log.updated = '';
+        }
+
+        // 使用重试机制保存
+        const savedId = await saveLogWithRetry(log);
+        if (!log.id) {
+            log.id = savedId;
+        }
+
+        // 更新本地缓存
+        const logs = await getLogs();
+        const index = logs.findIndex(l => l.id === log.id);
+        if (index >= 0) {
+            logs[index] = log;
+        } else {
+            logs.unshift(log);
+        }
+        saveLogs(logs);
+
+        await renderLogList();
+        showSection('list');
+    } catch (error) {
+        console.error('保存日志失败:', error);
+        alert('保存失败，请重试');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// 为保存按钮添加防抖
+document.getElementById('save-log-btn').onclick = debounce(() => {
+    const id = document.querySelector('#edit-title').innerText === '编辑日志' ? 
+        currentEditingLog?.id : null;
+    saveLog(id);
+}, 300);
+
+// 添加当前编辑日志的引用
+let currentEditingLog = null;
+
+// 修改 showLogEdit 函数，在编辑时支持多图
 function showLogEdit(log) {
+    currentEditingLog = log;
     showSection('edit');
     document.getElementById('edit-title').innerText = log ? '编辑日志' : '新增日志';
     document.getElementById('log-title').value = log ? log.title : '';
     document.getElementById('log-content').value = log ? log.content : '';
     document.getElementById('log-date').value = log ? log.date : (new Date().toISOString().slice(0,10));
-    currentImageBase64 = log && log.image ? log.image : '';
-    renderImagePreview(currentImageBase64);
+    // 若已有图片则认为存的是数组，否则转换成数组
+    currentImagesBase64 = log && log.image ? (Array.isArray(log.image) ? log.image : [log.image]) : [];
+    renderImagePreview(currentImagesBase64);
     document.getElementById('log-image').value = '';
-    document.getElementById('log-image').onchange = function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = evt => {
-                currentImageBase64 = evt.target.result;
-                renderImagePreview(currentImageBase64);
-            };
-            reader.readAsDataURL(file);
-        }
+    document.getElementById('save-log-btn').onclick = debounce(() => saveLog(log ? log.id : null), 300);
+    document.getElementById('cancel-edit-btn').onclick = function() {
+        showSection('list');
+        renderLogList();
     };
-    document.getElementById('save-log-btn').onclick = () => saveLog(log ? log.id : null);
     // 动态添加删除按钮并放入edit-btn-group中
     let delBtn = document.getElementById('edit-delete-btn');
     const btnGroup = document.querySelector('#log-edit-section .edit-btn-group');
@@ -233,11 +458,7 @@ function showLogEdit(log) {
     }
 }
 
-function renderImagePreview(img) {
-    const preview = document.getElementById('image-preview');
-    preview.innerHTML = img ? `<img src='${img}' alt='预览' />` : '';
-}
-
+// 修改 showLogView，动态从云端加载图片数据
 async function showLogView(id) {
     const logs = await getLogs();
     const log = logs.find(l => l.id === id);
@@ -246,13 +467,39 @@ async function showLogView(id) {
     document.getElementById('view-title').innerText = log.title;
     document.getElementById('view-content').innerText = log.content;
     document.getElementById('view-date').innerText = log.date ? `日期：${log.date}` : '';
-    const img = document.getElementById('view-image');
-    if (log.image) {
-        img.src = log.image;
-        img.style.display = '';
-    } else {
-        img.style.display = 'none';
+
+    const imageContainer = document.getElementById('view-image-container');
+    imageContainer.innerHTML = ''; // 清空之前的图片
+
+    if (log.image && Array.isArray(log.image) && log.image.length > 0) {
+        const imageCount = log.image.length;
+        let gridClass = '';
+        if (imageCount === 1) {
+            gridClass = 'single-image';
+        } else if (imageCount <= 3) {
+            gridClass = 'row-grid';
+        } else if (imageCount <= 6) {
+            gridClass = 'two-row-grid';
+        } else {
+            gridClass = 'nine-grid';
+        }
+        imageContainer.className = gridClass;
+
+        log.image.forEach(imgSrc => {
+            const img = document.createElement('img');
+            img.src = imgSrc;
+            img.alt = '日志图片';
+            img.style.cursor = 'zoom-in';
+            img.onclick = function() {
+                const modalImg = document.getElementById('img-modal-img');
+                const modal = document.getElementById('img-modal');
+                modalImg.src = imgSrc;
+                modal.style.display = 'flex';
+            };
+            imageContainer.appendChild(img);
+        });
     }
+
     document.getElementById('edit-log-btn').onclick = function() {
         showLogEdit(log);
     };
@@ -292,58 +539,6 @@ async function showLogView(id) {
     }
 }
 
-async function saveLog(id) {
-    const title = document.getElementById('log-title').value.trim();
-    const content = document.getElementById('log-content').value.trim();
-    const date = document.getElementById('log-date').value;
-    const image = currentImageBase64;
-    if (!title || !content) {
-        alert('标题和内容不能为空！');
-        return;
-    }
-    let logs = await getLogs();
-    let log;
-    if (id) {
-        // 修改
-        logs = logs.map(l => {
-            if (l.id === id) {
-                log = {...l, title, content, date, image, updated: new Date().toLocaleString()};
-                return log;
-            }
-            return l;
-        });
-    } else {
-        // 新增
-        log = {
-            id: '', // 先空，云端保存后会有id
-            title,
-            content,
-            date,
-            image,
-            created: new Date().toLocaleString(),
-            updated: ''
-        };
-        logs.unshift(log);
-    }
-    await saveLogToCloud(log);
-    renderLogList();
-    showSection('list');
-}
-
-document.getElementById('add-log-btn').onclick = function() {
-    showLogEdit(null);
-};
-document.getElementById('cancel-edit-btn').onclick = function() {
-    showSection('list');
-    renderLogList();
-};
-
-// 删除日志（云端）
-async function deleteLogFromCloud(id) {
-    if (!id) return;
-    await AV.Object.createWithoutData(LC_CLASS, id).destroy();
-}
-
 // 大图预览功能
 function setupImageModal() {
     const viewImg = document.getElementById('view-image');
@@ -362,6 +557,25 @@ function setupImageModal() {
         };
     }
 }
+
+// 添加样式到页面
+const style = document.createElement('style');
+style.textContent = `
+    .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+`;
+document.head.appendChild(style);
 
 // 初始化
 checkLogin();
